@@ -66,7 +66,7 @@ const ICONS = {
 let adminMode = false;
 export const setAdmin = v => { adminMode = !!v; };
 export function tabs(active) {
-  const items = [['train', '#/', '훈련'], ['tactics', '#/tactics', '전술'], ['quest', '#/quests', '퀘스트'], ['profile', '#/profile', '프로필'], ['shop', '#/shop', '상점']];
+  const items = [['train', '#/', '훈련'], ['quest', '#/quests', '퀘스트'], ['profile', '#/profile', '프로필'], ['shop', '#/shop', '상점']];
   if (adminMode) items.push(['admin', '#/admin', '관리']);
   return `<nav class="tabs" aria-label="메뉴">${items.map(([k, h, l]) =>
     `<a href="${h}" class="${k === active ? 'on' : ''}" ${k === active ? 'aria-current="page"' : ''} ${k === 'admin' ? 'style="color:' + (k === active ? 'var(--ps)' : '#9b87f5') + '"' : ''}><svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[k]}</svg>${l}</a>`).join('')}</nav>`;

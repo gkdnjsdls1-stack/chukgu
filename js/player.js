@@ -4,7 +4,7 @@ import { state, loadMe, logout } from './app.js';
 import { $, $$, esc, mount, toast, action, sheet, go, top, bindBack, tabs, countdown, fmtDate,
          BALL, BOLT, FIRE, BAND_LABEL, DAY } from './ui.js';
 
-const UNIT_COLOR = { 1: '#58cc02', 2: '#2fb5a0', 3: '#1cb0f6', 4: '#ff9600', 5: '#e05a9b', 6: '#ff7a3c', 7: '#1cb0f6', 8: '#7a5af8' };
+const UNIT_COLOR = { 1: '#58cc02', 2: '#2fb5a0', 3: '#1cb0f6', 4: '#ff9600', 5: '#e05a9b', 6: '#ff7a3c', 7: '#3b6fd8', 8: '#7a5af8' };
 const ITEM_HINT = {   // 배치·승급 측정 방법 (기획서)
   1: '제자리에서 양발 안쪽으로 좌우 터치, 30초 동안 횟수',
   2: '벽에 차서 돌아온 공을 멈추기, 10번 중 성공 수',
@@ -102,13 +102,15 @@ export async function home() {
     select('lessons', `user_id=eq.${uid}&completed_at=is.null&select=unit_id,stage`),
     select('lesson_comments', 'read_at=is.null&select=id'),
   ]);
-  const sk = await skills();
+  const [sk, openQ, rules] = await Promise.all([skills(),
+    select('quiz_attempts', `user_id=eq.${uid}&submitted_at=is.null&select=id,is_check`),
+    ref('rules', 'quiz_stage_rules', 'select=*&order=stage')]);
   await loadMe();
   const inOverall = new Set(sk.filter(s => s.in_overall).map(s => s.code));
   const ov = scores.filter(s => inOverall.has(s.skill_code));
   const overall = ov.length === 6 ? ov.reduce((a, s) => a + Number(s.score), 0) / 6 : null;
   const P = Object.fromEntries(prog.map(p => [p.unit_id, p]));
-  const body = us.filter(u => u.kind === 'body');
+  const body = us;   // 몸 훈련 유닛 + 전술(유닛 7)
   const score = Object.fromEntries(scores.map(s => [s.skill_code, Number(s.score)]));
 
   if (overall == null) {
@@ -121,10 +123,12 @@ export async function home() {
     return;
   }
 
-  // 오늘 고를 유닛: 진행 중 레슨 > 저장한 선택 > 요일 루틴 > 가장 낮은 스킬
-  let sel = open[0] && open[0].unit_id;
+  // 지금 유닛: 진행 중 레슨 > 저장한 선택 > 요일 루틴 > 가장 낮은 스킬
+  let sel = 0;
+  try { sel = +localStorage.getItem('chukgu.unit') || 0; } catch { sel = 0; }
+  if (sel !== 7 && open[0]) sel = open[0].unit_id;
   if (!sel) { try { sel = +localStorage.getItem('chukgu.unit') || 0; } catch { sel = 0; } }
-  if (!sel || !body.find(u => u.id === sel) || (P[sel] && P[sel].current_stage > 4)) {
+  if (!sel || !body.find(u => u.id === sel)) {
     const dow = todayDow();
     const live = body.filter(u => !P[u.id] || P[u.id].current_stage <= 4);
     if (dow === 2 && live.find(u => u.id === 6)) sel = 6;
@@ -133,48 +137,133 @@ export async function home() {
   }
   const su = body.find(u => u.id === sel);
   const sp = P[sel] || { current_stage: 1, lessons_in_stage: 0 };
-  const isOpen = open.some(o => o.unit_id === sel);
-  const graduated = sp.current_stage > 4;
-  const sunday = todayDow() === 0;
-  const partnerCheck = sel === 8 && sp.current_stage >= 3;
-  const routine = ['오늘은 쉬는 날이에요. 전술 퀴즈는 할 수 있어요', '주력 유닛 레슨 날', '체력·민첩 + 전술 연습 세트 날', '주력 유닛 레슨 날', '수비(또는 복습) + 전술 연습 세트 날', '주력 레슨 + 승급 체크 날', '관리자와 함께 하는 날 (1대1·미니게임)'][todayDow()];
-  const weakest = [...ov].sort((a, b) => a.score - b.score)[0];
-  const weakName = weakest && (sk.find(s => s.code === weakest.skill_code) || {}).name;
+  const cur = sp.current_stage, done2 = sp.lessons_in_stage;
+  const quizUnit = sel === 7;
+  const isOpen = quizUnit ? openQ.length > 0 : open.some(o => o.unit_id === sel);
+  const color = UNIT_COLOR[sel];
+  const routine = ['쉬는 날 · 전술 퀴즈만 할 수 있어요', '주력 유닛 레슨 날', '체력·민첩 + 전술 연습 날', '주력 유닛 레슨 날', '수비(또는 복습) + 전술 연습 날', '주력 레슨 + 승급 체크 날', '관리자와 함께 하는 날'][todayDow()];
 
-  let main = '';
-  if (graduated) main = '<div class="note g" style="margin:12px 0 0">이 유닛은 졸업했어요! 다른 유닛을 골라요</div>';
-  else if (sunday) main = '<button class="btn" disabled>일요일은 몸 훈련 쉬는 날</button>';
-  else if (isOpen) main = `<button class="btn" id="go">이어하기</button>`;
-  else if (sp.lessons_in_stage >= 2 && !partnerCheck) main = `<button class="btn" id="chk">승급 체크 하기</button><button class="ghost" id="go" style="color:#fff">레슨 한 번 더 · ⚡${sel === 8 && sp.current_stage >= 3 ? (sp.current_stage === 3 ? 3 : 2) : 4}</button>`;
-  else main = `<button class="btn" id="go">레슨 시작 · ⚡${sel === 8 && sp.current_stage >= 3 ? (sp.current_stage === 3 ? 3 : 2) : 4}</button>`;
+  // 길 위의 노드: 스테이지마다 레슨1 · 레슨2 · 승급 체크 · 보물상자
+  const nodes = [];
+  for (let st = 1; st <= 4; st++) {
+    const kinds = ['lesson', 'lesson', 'check', 'chest'];   // 전술은 연습 세트 1·2 → 승급 시험 → 상자
+    kinds.forEach((k, i) => {
+      let status;
+      if (st < cur) status = 'done';
+      else if (st > cur) status = 'locked';
+      else if (k === 'lesson') status = done2 >= i + 1 ? 'done' : (done2 === i ? 'current' : 'locked');
+      else if (k === 'check') status = done2 >= 2 ? 'current' : 'locked';
+      else status = 'locked';
+      nodes.push({ st, k, n: i + 1, status });
+    });
+  }
+  const OFFS = [0, 52, 78, 52, 0, -52, -78, -52];
+  const ICON = {
+    lesson: '<svg width="30" height="30" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2.4"/><path d="M12 7.5l3.6 2.6-1.4 4.2H9.8l-1.4-4.2z" fill="currentColor"/></svg>',
+    check: '<svg width="30" height="30" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4h10v4a5 5 0 0 1-10 0zM5 5H3v2a3 3 0 0 0 3 3M19 5h2v2a3 3 0 0 1-3 3M12 13v4M8 20h8" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    chest: '<svg width="34" height="30" viewBox="0 0 28 24" aria-hidden="true"><rect x="2" y="9" width="24" height="13" rx="2.5" fill="currentColor" opacity=".9"/><path d="M4 9V6a3 3 0 0 1 3-3h14a3 3 0 0 1 3 3v3" fill="none" stroke="currentColor" stroke-width="2.2"/><rect x="11.5" y="8" width="5" height="6" rx="1" fill="#fff"/></svg>',
+    board: '<svg width="30" height="30" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="2.2"/><path d="M12 5v14M3 12h3M18 12h3" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="2.4" fill="none" stroke="currentColor" stroke-width="2"/></svg>',
+    done: '<svg width="30" height="30" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  };
+  const shade = (hex, f = 0.78) => '#' + [1, 3, 5].map(i => Math.round(parseInt(hex.slice(i, i + 2), 16) * f).toString(16).padStart(2, '0')).join('');
+  let html = '', idx = 0;
+  nodes.forEach((nd, i) => {
+    if (nd.k === 'lesson' && nd.n === 1) {
+      html += `<div class="divider"><span></span><b>스테이지 ${nd.st} · Lv.${nd.st} → ${nd.st + 1}</b><span></span></div>`;
+    }
+    const off = OFFS[idx++ % OFFS.length];
+    const isCur = nd.status === 'current' && cur <= 4;
+    const bg = nd.status === 'done' ? color : isCur ? color : '#e5e5e5';
+    const fg = nd.status === 'locked' ? '#afafaf' : '#fff';
+    const label = nd.k === 'lesson' ? `${quizUnit ? '연습 세트' : '레슨'} ${nd.n}` : nd.k === 'check' ? (quizUnit ? '승급 시험' : '승급 체크') : '보물상자';
+    const icon = nd.status === 'done' && nd.k !== 'chest' ? ICON.done : (quizUnit && nd.k === 'lesson' ? ICON.board : ICON[nd.k]);
+    html += `<div class="node-wrap" style="transform:translateX(${off}px)">
+      ${isCur ? `<div class="bubble" style="color:${color}">${isOpen ? '이어하기' : nd.k === 'check' ? (quizUnit ? '승급 시험!' : '승급 체크!') : '시작'}</div>` : ''}
+      <button class="node ${nd.status} ${isCur ? 'cur' : ''} ${nd.k}" data-i="${i}" aria-label="스테이지 ${nd.st} ${label} ${nd.status === 'done' ? '완료' : nd.status === 'locked' ? '잠김' : ''}"
+        style="background:${nd.k === 'chest' && nd.status === 'done' ? '#ffc800' : bg};color:${fg};box-shadow:0 6px 0 ${nd.status === 'locked' ? '#cfcfcf' : nd.k === 'chest' && nd.status === 'done' ? '#e0a800' : shade(color)}">${icon}</button>
+    </div>`;
+  });
+  if (cur > 4) html += `<div class="note g" style="margin:20px">${esc(su.title)} 유닛을 졸업했어요! 위의 유닛 상자를 눌러 다른 유닛을 골라요</div>`;
 
-  const app = mount(`${statsBar(energy, overall)}
+  const app = mount(`<div class="homehead">${statsBar(energy, overall)}
+    <button class="unit-banner" id="pick" style="background:${color};box-shadow:0 4px 0 ${shade(color)}" aria-haspopup="dialog">
+      <div class="grow"><div class="k">유닛 ${sel} · ${cur > 4 ? '졸업' : `스테이지 ${cur}`}</div><div class="n">${esc(su.title)}</div></div>
+      <div class="pick-ic" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/></svg></div>
+    </button></div>
   <div class="page">
-    ${unread.length ? `<a href="#/comments" class="note p" style="display:block;margin-top:12px;text-decoration:none">관리자 코멘트 ${unread.length}개가 왔어요 · 보러 가기 ›</a>` : ''}
-    <div class="hero" style="background:${UNIT_COLOR[sel]}">
-      <div class="k">유닛 ${sel} · ${graduated ? '졸업' : `스테이지 ${sp.current_stage} · 레슨 ${Math.min(sp.lessons_in_stage, 2)}/2`}</div>
-      <div class="n">${esc(su.title)}</div>
-      <div class="d">${graduated ? 'Lv.5 달성' : `목표 Lv.${sp.current_stage} → Lv.${sp.current_stage + 1}`}</div>
-      ${partnerCheck && sp.lessons_in_stage >= 2 ? '<div class="note p" style="margin:10px 0 0">이 스테이지 승급 체크는 관리자와 1대1로 하고 관리자가 기록해요</div>' : ''}
-      <div style="margin-top:6px">${main}</div>
-    </div>
-    <div class="note o" style="margin-top:10px">오늘(${DAY[todayDow()]}): ${routine}${weakName ? ` · 약점: ${esc(weakName)}` : ''}</div>
-    <h2>유닛 고르기</h2>
-    ${body.map(u => {
-      const p = P[u.id] || { current_stage: 1, lessons_in_stage: 0 };
-      const lv = Math.min(p.current_stage, 5);
-      return `<button class="unit ${u.id === sel ? 'sel' : ''}" data-unit="${u.id}"><div class="ic" style="background:${p.current_stage > 4 ? '#c9c9c9' : UNIT_COLOR[u.id]}">${u.id}</div>
-        <div class="grow"><div class="nm">${esc(u.title)}</div><div class="ds">${p.current_stage > 4 ? '졸업 · Lv.5' : `스테이지 ${p.current_stage} · Lv.${lv}${score[u.skill_code] != null && u.id <= 6 ? ` · ${Math.round(score[u.skill_code])}점` : ''}`}</div></div>
-        ${open.some(o => o.unit_id === u.id) ? '<span class="chip" style="background:var(--gl);color:var(--gd)">진행 중</span>' : ''}</button>`;
-    }).join('')}
+    ${unread.length ? `<a href="#/comments" class="note p" style="display:block;margin:10px 16px 0;text-decoration:none">관리자 코멘트 ${unread.length}개 · 보러 가기 ›</a>` : ''}
+    <div class="today">오늘(${DAY[todayDow()]}) ${routine}</div>
+    <div class="path">${html}</div>
   </div>${tabs('train')}`);
-  $$('[data-unit]', app).forEach(b => b.addEventListener('click', () => {
-    if (open.length && +b.dataset.unit !== open[0].unit_id) toast(`진행 중인 유닛 ${open[0].unit_id} 레슨을 먼저 끝내요`);
-    try { localStorage.setItem('chukgu.unit', b.dataset.unit); } catch { /* 무시 */ }
-    home();
+
+  // 현재 노드로 스크롤
+  const curEl = $('.node.cur', app);
+  if (curEl) setTimeout(() => curEl.scrollIntoView({ block: 'center', behavior: 'instant' }), 0);
+
+  $('#pick', app).addEventListener('click', () => {
+    const s = sheet(`<div class="res" style="margin-bottom:12px">유닛 고르기</div><div style="max-height:62vh;overflow:auto;margin:0 -20px">
+      ${body.map(u => {
+        const p = P[u.id] || { current_stage: 1, lessons_in_stage: 0 };
+        return `<button class="unit ${u.id === sel ? 'sel' : ''}" data-unit="${u.id}"><div class="ic" style="background:${p.current_stage > 4 ? '#c9c9c9' : UNIT_COLOR[u.id]}">${u.id}</div>
+          <div class="grow"><div class="nm">${esc(u.title)}</div><div class="ds">${p.current_stage > 4 ? '졸업 · Lv.5' : `스테이지 ${p.current_stage} · Lv.${p.current_stage}${score[u.skill_code] != null && u.id <= 6 ? ` · ${Math.round(score[u.skill_code])}점` : ''}`}${u.id === 6 ? ' · 매주 화' : u.id === 7 ? ' · 퀴즈 · 화·목' : u.id === 8 ? ' · 목요일' : ''}</div></div>
+          ${(u.id === 7 ? openQ.length : open.some(o => o.unit_id === u.id)) ? '<span class="chip" style="background:var(--gl);color:var(--gd)">진행 중</span>' : ''}</button>`;
+      }).join('')}</div><button class="ghost" id="cl" style="color:#999">닫기</button>`);
+    s.el.addEventListener('click', e => { if (e.target === s.el) s.close(); });
+    $('#cl', s.el).addEventListener('click', s.close);
+    $$('[data-unit]', s.el).forEach(b => b.addEventListener('click', () => {
+      const id = +b.dataset.unit;
+      if (open.length && id !== 7 && id !== open[0].unit_id) { toast(`진행 중인 유닛 ${open[0].unit_id} 레슨을 먼저 끝내요`); return; }
+      try { localStorage.setItem('chukgu.unit', String(id)); } catch { /* 무시 */ }
+      s.close(); home();
+    }));
+  });
+
+  $$('.node', app).forEach(b => b.addEventListener('click', async () => {
+    const nd = nodes[+b.dataset.i];
+    if (nd.status === 'locked') return toast(nd.k === 'chest' ? '승급 체크를 통과하면 열려요' : '앞 단계를 먼저 끝내요');
+    if (nd.status === 'done') return toast(nd.k === 'chest' ? '이미 연 상자예요' : '끝낸 단계예요');
+    const sunday = todayDow() === 0;
+    if (quizUnit) {
+      const r = rules.find(x => x.stage === cur) || { need_correct: 6, out_of: 10 };
+      const names = ['규칙과 포지션', '공간과 위치', '공격 상황', '수비 상황'];
+      const isCheck = nd.k === 'check';
+      const s = sheet(`<div style="font-size:12px;font-weight:800;color:${color}">유닛 7 · 스테이지 ${cur} · ${names[cur - 1]}</div>
+        <div class="res" style="color:var(--t)">${isCheck ? '승급 시험' : `연습 세트 ${nd.n}/2`}</div>
+        <div style="background:#f5f5f5;border-radius:14px;padding:12px 14px;font-size:14px;font-weight:700;line-height:1.8;margin:8px 0 14px">${isCheck
+          ? `${r.out_of}문제 중 ${r.need_correct}개 맞히면 통과 · 에너지 안 써요<br>통과하면 +20 XP와 보물상자${cur >= 3 ? '<br>관리자와 미니게임도 해 보면 좋아요' : ''}`
+          : `5문제 · 문제당 ⚡1 · 세트당 +5 XP<br>다 풀면 정답과 풀이를 보여 줘요<br>일요일에도 할 수 있어요`}</div>
+        ${openQ.length ? `<button class="btn" id="qz" style="background:${color};box-shadow:0 4px 0 ${shade(color)}">풀던 ${openQ[0].is_check ? '시험' : '세트'} 이어하기</button>`
+          : `<button class="btn" id="qz" style="background:${color};box-shadow:0 4px 0 ${shade(color)}">${isCheck ? '시험 보기' : '퀴즈 풀기 · ⚡5'}</button>`}
+        ${isCheck && !openQ.length ? '<button class="ghost" id="more">연습 세트 한 번 더 · ⚡5</button>' : ''}
+        <button class="ghost" id="cl" style="color:#999">닫기</button>`);
+      s.el.addEventListener('click', e => { if (e.target === s.el) s.close(); });
+      $('#cl', s.el).addEventListener('click', s.close);
+      $('#qz', s.el).addEventListener('click', () => { s.close(); go(openQ.length ? (openQ[0].is_check ? '#/quiz/check' : '#/quiz/practice') : isCheck ? '#/quiz/check' : '#/quiz/practice'); });
+      const mo = $('#more', s.el); if (mo) mo.addEventListener('click', () => { s.close(); go('#/quiz/practice'); });
+      return;
+    }
+    const partner = sel === 8 && cur >= 3;
+    const lessonEnergy = partner ? (cur === 3 ? 3 : 2) : 4;
+    if (nd.k === 'check') {
+      const s = sheet(`<div class="res" style="color:${color}">스테이지 ${cur} 승급 체크</div>
+        <div style="font-size:14px;color:#555;line-height:1.6;margin-bottom:14px">${partner ? '이 스테이지 체크는 관리자와 1대1로 하고 관리자가 기록해요. 관리자에게 말해 주세요!' : '3분 동안 재서 다음 레벨 기준을 넘으면 통과해요. 통과하면 보물상자가 열려요.'}</div>
+        ${partner ? '' : '<button class="btn" id="chk">승급 체크 하기</button>'}
+        <button class="ghost" id="more" ${sunday ? 'disabled' : ''}>레슨 한 번 더 · ⚡${lessonEnergy}</button>`);
+      s.el.addEventListener('click', e => { if (e.target === s.el) s.close(); });
+      const c = $('#chk', s.el); if (c) c.addEventListener('click', () => { s.close(); go(`#/check/${sel}`); });
+      $('#more', s.el).addEventListener('click', () => { s.close(); go(`#/lesson/${sel}`); });
+      return;
+    }
+    const ms = await select('missions', `unit_id=eq.${sel}&stage=eq.${cur}&meetup_only=is.false&order=slot&select=slot,title,target,is_challenge`);
+    const s = sheet(`<div style="font-size:12px;font-weight:800;color:${color}">유닛 ${sel} · 스테이지 ${cur} · 레슨 ${nd.n}/2</div>
+      <div class="res" style="color:var(--t)">${esc(su.title)} · 약 ${ms.length * 2 + 5}분</div>
+      <div style="background:#f5f5f5;border-radius:14px;padding:12px 14px;font-size:14px;font-weight:700;line-height:1.9;margin:8px 0 14px">워밍업 3분<br>${ms.map(m => `${m.is_challenge ? '<span style="color:var(--o)">④ 도전</span>' : '①②③'[m.slot - 1]} ${esc(m.title)}${m.is_challenge ? ` <span style="color:var(--t3);font-weight:600">(내 목표 ${esc(targetText(m.target, band()))})</span>` : ''}`).join('<br>')}<br>스트레칭 2분</div>
+      <button class="btn" id="st" style="background:${color};box-shadow:0 4px 0 ${shade(color)}" ${sunday ? 'disabled' : ''}>${sunday ? '일요일은 쉬는 날' : `${isOpen ? '이어하기' : '훈련 시작'} · ⚡${lessonEnergy}`}</button>
+      <button class="ghost" id="cl" style="color:#999">닫기</button>`);
+    s.el.addEventListener('click', e => { if (e.target === s.el) s.close(); });
+    $('#cl', s.el).addEventListener('click', s.close);
+    $('#st', s.el).addEventListener('click', () => { s.close(); go(`#/lesson/${sel}`); });
   }));
-  const g = $('#go', app); if (g) g.addEventListener('click', () => go(`#/lesson/${sel}`));
-  const c = $('#chk', app); if (c) c.addEventListener('click', () => go(`#/check/${sel}`));
 }
 
 // ------------------------------------------------------------------ 배치 테스트
@@ -331,7 +420,7 @@ async function complete(ctx, r) {
 
 // ------------------------------------------------------------------ 승급 체크
 export async function check(unitId) {
-  if (unitId === 7) return go('#/tactics');
+  if (unitId === 7) return go('#/quiz/check');
   const uid = auth.userId;
   const [us, prog, items] = await Promise.all([units(), select('unit_progress', `user_id=eq.${uid}&unit_id=eq.${unitId}&select=*`), testItems()]);
   const u = us.find(x => x.id === unitId);
@@ -389,29 +478,9 @@ export async function check(unitId) {
 
 // ------------------------------------------------------------------ 전술
 export async function tactics() {
-  const uid = auth.userId;
-  const [prog, rules, energy, openQ] = await Promise.all([
-    select('unit_progress', `user_id=eq.${uid}&unit_id=eq.7&select=*`),
-    select('quiz_stage_rules', 'select=*&order=stage'),
-    rpc('my_energy'),
-    select('quiz_attempts', `user_id=eq.${uid}&submitted_at=is.null&select=id,is_check`),
-  ]);
-  const p = prog[0] || { current_stage: 1, lessons_in_stage: 0 };
-  const names = ['규칙과 포지션', '공간과 위치', '공격 상황', '수비 상황'];
-  const grad = p.current_stage > 4;
-  const ready = !grad && p.lessons_in_stage >= 2;
-  const app = mount(`${top('전술', { right: `<span class="chip" style="background:var(--bl);color:var(--bd)">전술 Lv.${Math.min(p.current_stage, 5)}</span>` })}
-  <div class="page">
-    <div class="hero" style="background:var(--b)"><div class="k">${grad ? '전술 졸업' : `스테이지 ${p.current_stage} · ${names[p.current_stage - 1]}`}</div>
-      <div class="n">연습 세트 ${grad ? '' : `${Math.min(p.lessons_in_stage, 2)}/2`}</div><div class="d">문제당 ⚡1 · 세트당 +5 XP · 남은 ⚡${energy.energy}</div>
-      ${openQ.length ? `<button class="btn" id="res" style="color:var(--bs)">풀던 ${openQ[0].is_check ? '시험' : '세트'} 이어하기</button>` : `<button class="btn" id="pr" style="color:var(--bs)">연습 세트 (5문제)</button>
-      ${ready ? '<button class="btn" id="ck" style="margin-top:10px;color:var(--ps)">승급 시험 (10문제 · 에너지 안 씀)</button>' : ''}`}</div>
-    <h2>스테이지</h2>
-    ${rules.map(r => `<div class="unit"><div class="ic" style="background:${r.stage < p.current_stage ? 'var(--g)' : r.stage === p.current_stage ? 'var(--b)' : '#c9c9c9'}">${r.stage}</div><div class="grow"><div class="nm">${names[r.stage - 1]}</div><div class="ds">${r.out_of}문제 중 ${r.need_correct}개 정답으로 통과${r.stage >= 3 ? ' · 관리자와 미니게임 권장' : ''}</div></div>${r.stage < p.current_stage ? '<b style="color:var(--gd)">완료</b>' : ''}</div>`).join('')}
-  </div>${tabs('tactics')}`);
-  const pr = $('#pr', app); if (pr) pr.addEventListener('click', () => go('#/quiz/practice'));
-  const ck = $('#ck', app); if (ck) ck.addEventListener('click', () => go('#/quiz/check'));
-  const rs = $('#res', app); if (rs) rs.addEventListener('click', () => go(openQ[0].is_check ? '#/quiz/check' : '#/quiz/practice'));
+  // 전술은 홈의 유닛 7로 합쳤다
+  try { localStorage.setItem('chukgu.unit', '7'); } catch { /* 무시 */ }
+  return go('#/');
 }
 
 export async function quiz(isCheck) {
@@ -430,7 +499,7 @@ export async function quiz(isCheck) {
       <div style="margin:6px 20px 16px;font-size:20px;font-weight:800;line-height:1.45">${esc(x.prompt)}</div>
       ${x.choices.map((c, k) => `<button class="opt ${answers[x.id] === k ? 'sel' : ''}" data-k="${k}">${esc(c)}</button>`).join('')}</div>
     <div class="foot"><button class="btn ${isCheck ? 'p' : 'b'}" id="ok" ${answers[x.id] == null ? 'disabled' : ''}>${i === qs.length - 1 ? '제출' : '다음'}</button></div>`);
-    $('#x', app).addEventListener('click', () => go('#/tactics'));
+    $('#x', app).addEventListener('click', () => go('#/'));
     $$('[data-k]', app).forEach(b => b.addEventListener('click', () => { answers[x.id] = +b.dataset.k; draw(); }));
     action($('#ok', app), async () => {
       if (i < qs.length - 1) { i += 1; return draw(); }
@@ -448,16 +517,16 @@ export async function quiz(isCheck) {
         <div class="dots">${(r.review || []).map(v => `<i style="background:${v.right ? 'var(--g)' : 'var(--r)'}">${v.right ? '○' : '×'}</i>`).join('')}</div>
         <div style="font-size:12px;color:var(--t3)">시험은 맞고 틀린 것만 알려 줘요</div></div>
         ${r.passed ? `<div class="boxes"><div><b>Lv.${r.tactics_level}</b><small>전술</small></div><div><b>+${r.chest_balls}</b><small>축구공</small></div><div><b>+20</b><small>XP</small></div></div>` : '<div class="note o">연습 세트 1번 더 하고 다시 도전해요</div>'}</div>
-        <div class="foot"><button class="btn" onclick="location.hash='#/tactics'">계속</button></div>`);
+        <div class="foot"><button class="btn" onclick="location.hash='#/'">계속</button></div>`);
     } else {
       mount(`${top('연습 세트 풀이')}<div class="page"><div class="note b" style="margin-top:14px">${r.total}문제 중 ${r.correct}개 정답 · +${r.xp} XP · 남은 ⚡${r.energy}</div>
         ${(r.review || []).map(v => { const x = byId[v.id] || { prompt: '', choices: [] }; const ok = v.answer === v.yours;
           return `<div class="card"><div style="font-weight:800;line-height:1.45">${ok ? '⭕' : '❌'} ${esc(x.prompt)}</div><div style="font-size:14px;color:var(--gd);font-weight:800;margin-top:6px">정답: ${esc(x.choices[v.answer])}</div>${ok ? '' : `<div style="font-size:14px;color:#d33;font-weight:700">내 답: ${esc(x.choices[v.yours])}</div>`}</div>`; }).join('')}
         ${r.check_ready ? '<div class="note g">연습 2번 완료! 승급 시험을 볼 수 있어요</div>' : ''}</div>
-        <div class="foot"><button class="btn b" onclick="location.hash='#/tactics'">전술로</button></div>`);
+        <div class="foot"><button class="btn b" onclick="location.hash='#/'">홈으로</button></div>`);
     }
   };
-  if (!qs.length) { toast('문제가 없어요'); return go('#/tactics'); }
+  if (!qs.length) { toast('문제가 없어요'); return go('#/'); }
   draw();
 }
 

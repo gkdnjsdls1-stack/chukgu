@@ -1,9 +1,10 @@
 // 관리자 화면: 아이 목록·가입 승인·레슨 기록과 코멘트·점수·함께 한 체크 기록
 import { rpc, select } from './api.js';
 import { state, loadMe, logout } from './app.js';
-import { $, $$, esc, mount, toast, action, go, top, bindBack, fmtDate, BAND_LABEL } from './ui.js';
+import { $, $$, esc, mount, toast, action, go, top, bindBack, fmtDate, BAND_LABEL, tabs } from './ui.js';
 
 const ADMIN = '<span class="chip admin">관리자</span>';
+const MY_CODE = me => me.coach_code || '------';
 
 export async function home() {
   const [players] = await Promise.all([rpc('my_players'), loadMe()]);
@@ -22,10 +23,8 @@ export async function home() {
     <div class="card" style="margin-top:16px"><div style="font-size:13px;font-weight:800;color:var(--t3)">초대 코드</div><div style="font-size:32px;font-weight:800;letter-spacing:6px;margin-top:4px">${esc(me.coach_code || '------')}</div>
       <div style="font-size:13px;color:var(--t2);margin-top:6px;line-height:1.5">아이가 가입할 때 이 코드를 넣으면 나에게 묶여요. 승인해야 훈련을 시작해요.<br>14세 미만은 보호자 동의를 앱 밖에서 받아 주세요.</div>
       <button class="btn p" id="share" style="margin-top:12px">코드 공유하기</button></div>
-    <button class="ghost" id="out" style="color:var(--r);margin:10px 0">로그아웃</button>
-  </div>`);
+  </div>${tabs('admin')}`);
   $$('[data-p]', app).forEach(b => b.addEventListener('click', () => go(`#/admin/p/${b.dataset.p}`)));
-  $('#out', app).addEventListener('click', logout);
   action($('#share', app), async () => {
     const text = `축구 훈련 앱 초대 코드: ${me.coach_code}\n${location.origin}${location.pathname}`;
     if (navigator.share) { try { await navigator.share({ text }); return; } catch { /* 취소 */ } }

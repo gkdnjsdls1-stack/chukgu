@@ -1,7 +1,7 @@
 // 앱 시작·라우터·로그인/가입 화면
 import { getConfig, saveConfig, clearConfig, configEditable } from './config.js';
 import { auth, rpc, select } from './api.js';
-import { $, esc, mount, spinner, toast, action, go, top, bindBack, BAND_LABEL } from './ui.js';
+import { $, esc, mount, spinner, toast, action, go, top, bindBack, BAND_LABEL, setAdmin } from './ui.js';
 import * as P from './player.js';
 import * as A from './admin.js';
 
@@ -136,7 +136,7 @@ export async function route() {
   if (!auth.session) return screenLogin();
   spinner();
   try {
-    if (!state.me || hash === '#/' || hash === '#/admin') await loadMe();
+    if (!state.me || hash === '#/' || hash === '#/admin' || hash === '#/profile') await loadMe();
   } catch (e) {
     if (e.status === 401) { await auth.signOut(); return screenLogin(); }
     return mount(`${top('연결 오류')}<div class="page"><div class="note r">${esc(e.message)}</div></div><div class="foot"><button class="btn" onclick="location.reload()">다시 시도</button></div>`);
@@ -148,8 +148,11 @@ export async function route() {
 
   const parts = hash.slice(2).split('/');   // '#/lesson/1' -> ['lesson','1']
   try {
-    if (me.role === 'admin') {
-      if (parts[0] === 'admin' && parts[1] === 'p' && parts[2]) return await A.player(parts[2], parts[3] || 'lessons');
+    setAdmin(me.role === 'admin');
+    // 관리자도 같은 계정으로 훈련한다. 관리 기능은 「관리」 탭(#/admin)에 추가로 붙는다
+    if (parts[0] === 'admin') {
+      if (me.role !== 'admin') return go('#/');
+      if (parts[1] === 'p' && parts[2]) return await A.player(parts[2], parts[3] || 'lessons');
       return await A.home();
     }
     switch (parts[0]) {

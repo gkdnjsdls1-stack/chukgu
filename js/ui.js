@@ -61,11 +61,15 @@ const ICONS = {
   quest: '<path d="M6 3h12v18l-6-4-6 4z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>',
   profile: '<circle cx="12" cy="8" r="4" fill="none" stroke="currentColor" stroke-width="2"/><path d="M4 21c1-4 4-6 8-6s7 2 8 6" fill="none" stroke="currentColor" stroke-width="2"/>',
   shop: '<path d="M4 8h16l-1 12H5zM8 8V6a4 4 0 0 1 8 0v2" fill="none" stroke="currentColor" stroke-width="2"/>',
+  admin: '<path d="M12 3l8 3v6c0 4.5-3.4 8-8 9-4.6-1-8-4.5-8-9V6z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M9 12l2 2 4-4" fill="none" stroke="currentColor" stroke-width="2"/>',
 };
+let adminMode = false;
+export const setAdmin = v => { adminMode = !!v; };
 export function tabs(active) {
   const items = [['train', '#/', '훈련'], ['tactics', '#/tactics', '전술'], ['quest', '#/quests', '퀘스트'], ['profile', '#/profile', '프로필'], ['shop', '#/shop', '상점']];
+  if (adminMode) items.push(['admin', '#/admin', '관리']);
   return `<nav class="tabs" aria-label="메뉴">${items.map(([k, h, l]) =>
-    `<a href="${h}" class="${k === active ? 'on' : ''}" ${k === active ? 'aria-current="page"' : ''}><svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[k]}</svg>${l}</a>`).join('')}</nav>`;
+    `<a href="${h}" class="${k === active ? 'on' : ''}" ${k === active ? 'aria-current="page"' : ''} ${k === 'admin' ? 'style="color:' + (k === active ? 'var(--ps)' : '#9b87f5') + '"' : ''}><svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[k]}</svg>${l}</a>`).join('')}</nav>`;
 }
 
 export const BALL = '<svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10" fill="#fff" stroke="#3c3c3c" stroke-width="2"/><path d="M12 7l4 3-1.5 4.5h-5L8 10z" fill="#3c3c3c"/></svg>';
